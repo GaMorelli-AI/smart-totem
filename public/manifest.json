@@ -1,0 +1,21 @@
+{
+  "name": "Smart Totem Bio Extratus",
+  "short_name": "SmartTotem",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#DDEBDD",
+  "theme_color": "#5C9B74",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
