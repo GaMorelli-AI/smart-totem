@@ -167,6 +167,66 @@ export default function SmartTotemMockup() {
   const [activeVideo, setActiveVideo] = useState("B");
   const [videoASrc, setVideoASrc] = useState(VIDEO.step1);
 
+  const INACTIVITY_MS = 40000;      
+  const RESULT_INACTIVITY_MS = 45000; // 45s no resultado (step 4)
+
+  // 🔁 TIMER DE RESET AUTOMÁTICO (RESULTADO)
+  const resetTimerRef = useRef(null);
+
+  function getTimeoutForStep() {
+    // timer menor no resultado, maior no resto
+    return step === 4 ? RESULT_INACTIVITY_MS : INACTIVITY_MS;
+  }
+
+  function clearResetTimer() {
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+    }
+  }
+
+  function getTimeoutForStep() {
+  // timer menor no resultado, maior no resto
+  return step === 4 ? RESULT_INACTIVITY_MS : INACTIVITY_MS;
+  }
+
+    // ✅ PASSO 3 — qualquer interação no step 4 reinicia o timer
+  function bumpAutoReset() {
+    // só roda enquanto o questionário estiver ativo
+    if (!started) return;
+
+    clearResetTimer();
+
+    resetTimerRef.current = setTimeout(() => {
+      reset(); // volta pro "Toque para iniciar"
+    }, getTimeoutForStep());
+  }
+
+  useEffect(() => {
+    clearResetTimer();
+
+    if (!started) return;   // se tá na tela do PLAY, não reseta por inatividade
+    bumpAutoReset();        // sempre que entrar num step, começa a contagem
+
+    return () => clearResetTimer();
+  }, [started, step]);
+
+  useEffect(() => {
+    if (!started) return;
+
+    const events = ["pointerdown", "touchstart", "mousemove", "keydown", "scroll"];
+    const onActivity = () => bumpAutoReset();
+
+    events.forEach((evt) =>
+      window.addEventListener(evt, onActivity, { passive: true })
+    );
+
+    return () => {
+      events.forEach((evt) => window.removeEventListener(evt, onActivity));
+    };
+  }, [started, step]);
+
+
   // troca o vídeo A conforme step (apenas depois que started = true)
   useEffect(() => {
     if (!started) return;
@@ -429,6 +489,7 @@ export default function SmartTotemMockup() {
                   </div>
                 </>
               )}
+              
             </div>
 
             <div className="pt-6 flex items-center justify-between">
