@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState, useEffect } from "react";
+import React, { useMemo, useRef, useState, useEffect, useCallback } from "react";
 
 const VIDEO = {
   standby: "/videos/bio_extratus_standby.mp4",
@@ -156,6 +156,8 @@ export default function SmartTotemMockup() {
   const [step, setStep] = useState(1);
   const [started, setStarted] = useState(false);
 
+  const scrollRef = useRef(null);
+
   const [tipo, setTipo] = useState(null);
   const [qualidade, setQualidade] = useState([]);
   const [procedimento, setProcedimento] = useState(null);
@@ -167,50 +169,87 @@ export default function SmartTotemMockup() {
   const [activeVideo, setActiveVideo] = useState("B");
   const [videoASrc, setVideoASrc] = useState(VIDEO.step1);
 
-  const INACTIVITY_MS = 40000;      
+  const INACTIVITY_MS = 40000;
   const RESULT_INACTIVITY_MS = 45000; // 45s no resultado (step 4)
 
-  // 🔁 TIMER DE RESET AUTOMÁTICO (RESULTADO)
+  // 🔁 TIMER DE RESET AUTOMÁTICO (INATIVIDADE)
   const resetTimerRef = useRef(null);
 
-  function getTimeoutForStep() {
-    // timer menor no resultado, maior no resto
-    return step === 4 ? RESULT_INACTIVITY_MS : INACTIVITY_MS;
-  }
-
-  function clearResetTimer() {
+  const clearResetTimer = useCallback(() => {
     if (resetTimerRef.current) {
       clearTimeout(resetTimerRef.current);
       resetTimerRef.current = null;
     }
-  }
+  }, []);
 
-  function getTimeoutForStep() {
-  // timer menor no resultado, maior no resto
-  return step === 4 ? RESULT_INACTIVITY_MS : INACTIVITY_MS;
-  }
+  const getTimeoutForStep = useCallback(() => {
+    return step === 4 ? RESULT_INACTIVITY_MS : INACTIVITY_MS;
+  }, [step]);
 
-    // ✅ PASSO 3 — qualquer interação no step 4 reinicia o timer
-  function bumpAutoReset() {
-    // só roda enquanto o questionário estiver ativo
+  const ensureStandbyLoop = useCallback(() => {
+    const main = videoARef.current;     // vídeo A (fala)
+    const standby = videoBRef.current;  // vídeo B (standby)
+
+    // pausa e limpa o vídeo A para não "congelar" frame
+    if (main) {
+      main.pause();
+      try { main.currentTime = 0; } catch {}
+    }
+
+    // garante standby rodando em loop
+    if (standby) {
+      standby.loop = true;
+      standby.muted = true; // standby sempre mudo
+      try { standby.currentTime = 0; } catch {}
+      standby.play().catch(() => {});
+    }
+
+    setActiveVideo("B");
+  }, []);
+
+  const reset = useCallback(() => {
+    setStarted(false);
+    setStep(1);
+    setTipo(null);
+    setQualidade([]);
+    setProcedimento(null);
+
+    setActiveVideo("B");
+    setVideoASrc(VIDEO.step1);
+
+    const a = videoARef.current;
+    if (a) a.pause();
+
+    const b = videoBRef.current;
+    if (b) {
+      b.loop = true;
+      b.muted = true;
+      try { b.currentTime = 0; } catch {}
+      b.play().catch(() => {});
+    }
+  }, []);
+
+  // ✅ inatividade: reseta para tela do PLAY
+  const bumpAutoReset = useCallback(() => {
     if (!started) return;
 
     clearResetTimer();
 
     resetTimerRef.current = setTimeout(() => {
-      reset(); // volta pro "Toque para iniciar"
+      reset();
     }, getTimeoutForStep());
-  }
+  }, [started, clearResetTimer, getTimeoutForStep, reset]);
 
+  // sempre que entrar num step (ou iniciar), começa contagem
   useEffect(() => {
     clearResetTimer();
+    if (!started) return;
 
-    if (!started) return;   // se tá na tela do PLAY, não reseta por inatividade
-    bumpAutoReset();        // sempre que entrar num step, começa a contagem
-
+    bumpAutoReset();
     return () => clearResetTimer();
-  }, [started, step]);
+  }, [started, step, bumpAutoReset, clearResetTimer]);
 
+  // qualquer interação reinicia timer (qualquer step)
   useEffect(() => {
     if (!started) return;
 
@@ -224,8 +263,17 @@ export default function SmartTotemMockup() {
     return () => {
       events.forEach((evt) => window.removeEventListener(evt, onActivity));
     };
-  }, [started, step]);
+  }, [started, bumpAutoReset]);
 
+  // ✅ SCROLL SEMPRE PRO TOPO ao mudar etapa/iniciar (inclui resultado)
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    requestAnimationFrame(() => {
+      el.scrollTop = 0;
+    });
+  }, [step, started]);
 
   // troca o vídeo A conforme step (apenas depois que started = true)
   useEffect(() => {
@@ -237,35 +285,26 @@ export default function SmartTotemMockup() {
       return;
     }
 
-    // STEP 1/2/3 = vídeo falado no A
-    const main = videoARef.current;
-    if (!main) return;
-
+    // STEP 1/2/3 = vídeo falado no A (não loop)
     const src =
       step === 1 ? VIDEO.step1 :
       step === 2 ? VIDEO.step2 :
       VIDEO.step3;
 
-    main.src = src;
-    try { main.currentTime = 0; } catch {}
-    main.loop = false;
-    main.muted = false;
-    main.volume = 1;
-
-    main.play().catch(() => {});
+    setVideoASrc(src);
     setActiveVideo("A");
-  }, [step, started]);
+  }, [step, started, ensureStandbyLoop]);
 
-
-  // sempre que videoASrc mudar, toca o vídeo A (com som)
+  // quando videoASrc mudar: toca o vídeo A (com som) e troca para A
   useEffect(() => {
     if (!started) return;
 
     const v = videoARef.current;
     if (!v) return;
 
+    v.src = videoASrc;
     v.load();
-    v.currentTime = 0;
+    try { v.currentTime = 0; } catch {}
     v.loop = false;
     v.muted = false;
     v.volume = 1;
@@ -294,7 +333,6 @@ export default function SmartTotemMockup() {
     setActiveVideo("B");
   }
 
-
   const pilar = useMemo(() => decidirPilar({ qualidade, procedimento }), [qualidade, procedimento]);
   const recomendados = useMemo(() => CATALOGO[pilar] || [], [pilar]);
 
@@ -302,32 +340,16 @@ export default function SmartTotemMockup() {
     setQualidade((prev) => (prev.includes(item) ? prev.filter((x) => x !== item) : [...prev, item]));
   }
 
-  function reset() {
-    setStarted(false);
+  function startApp() {
+    // clique do usuário: libera áudio e inicia step1
+    setStarted(true);
     setStep(1);
     setTipo(null);
     setQualidade([]);
     setProcedimento(null);
 
-    setActiveVideo("B");
-
-    const a = videoARef.current;
-    if (a) a.pause();
-
-    const b = videoBRef.current;
-    if (b) {
-      b.loop = true;
-      b.muted = true;
-      b.play().catch(() => {});
-    }
-  }
-
-  function startApp() {
-    // clique do usuário: libera áudio e inicia step1
-    setStarted(true);
-    setStep(1);
-    setVideoASrc(VIDEO.step1);
     setActiveVideo("A");
+    setVideoASrc(VIDEO.step1);
   }
 
   const canContinue =
@@ -335,41 +357,18 @@ export default function SmartTotemMockup() {
     (step === 2 && qualidade.length > 0) ||
     (step === 3 && !!procedimento);
 
-  function ensureStandbyLoop() {
-    const main = videoARef.current;     // vídeo A (fala)
-    const standby = videoBRef.current;  // vídeo B (standby)
-
-    // pausa e limpa o vídeo A para não "congelar" frame no topo
-    if (main) {
-      main.pause();
-      try { main.currentTime = 0; } catch {}
-    }
-
-    // garante standby rodando em loop
-    if (standby) {
-      standby.loop = true;
-      standby.muted = true; // standby sempre mudo
-      try { standby.currentTime = 0; } catch {}
-      standby.play().catch(() => {});
-    }
-
-    setActiveVideo("B");
-  }
-
-
   function goNext() {
     if (step === 1 && !tipo) return;
     if (step === 2 && qualidade.length === 0) return;
     if (step === 3 && !procedimento) return;
 
-    // 👇 SE ESTIVER SAINDO DO STEP 3, FORÇA STANDBY
+    // 👇 saindo do STEP 3: para o vídeo falado imediatamente e entra standby
     if (step === 3) {
       handleEndedA();
     }
 
     setStep((s) => Math.min(4, s + 1));
   }
-
 
   function goBack() {
     setStep((s) => Math.max(1, s - 1));
@@ -421,7 +420,7 @@ export default function SmartTotemMockup() {
       <div className="min-h-0">
         <div className="mx-auto max-w-[980px] h-full px-6 pt-10 pb-6">
           <div className="mx-auto max-w-[760px] h-full min-h-0 flex flex-col">
-            <div className="flex-1 min-h-0 overflow-auto pr-2">
+            <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto pr-2">
               {step === 1 && (
                 <>
                   <SectionHeader label="CONSULTORIA CAPILAR" title="Análise Capilar" subtitle="Tipo de cabelo:" />
@@ -489,7 +488,6 @@ export default function SmartTotemMockup() {
                   </div>
                 </>
               )}
-              
             </div>
 
             <div className="pt-6 flex items-center justify-between">
